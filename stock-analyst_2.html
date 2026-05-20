@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>株式アナリスト</title>
+<style>
+:root {
+  --bg: #060a0f; --surface: #0d1420; --surface2: #131d2e;
+  --border: rgba(56,189,248,0.12); --accent: #38bdf8; --accent2: #0ea5e9;
+  --up: #22c55e; --down: #ef4444; --text: #e2e8f0; --muted: #64748b; --gold: #f59e0b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: var(--bg); color: var(--text); font-family: 'Hiragino Sans', sans-serif; min-height: 100vh; padding-bottom: 40px; }
+
+.header { padding: 20px; background: linear-gradient(180deg, rgba(56,189,248,0.06) 0%, transparent 100%); border-bottom: 1px solid var(--border); }
+.header-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.header h1 { font-size: 20px; font-weight: 900; }
+.header h1 span { color: var(--accent); }
+.header p { font-size: 11px; color: var(--muted); margin-left: 34px; }
+.warning { margin-top: 10px; padding: 8px 12px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; font-size: 11px; color: var(--gold); line-height: 1.5; }
+
+.search-area { padding: 16px 20px 0; }
+.search-wrap { position: relative; margin-bottom: 10px; }
+.search-row { display: flex; gap: 8px; }
+.ticker-input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 13px 16px; color: var(--text); font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.ticker-input:focus { border-color: var(--accent); }
+.ticker-input::placeholder { color: var(--muted); }
+.search-btn { padding: 13px 20px; background: var(--accent2); color: #fff; border: none; border-radius: 12px; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.search-btn:disabled { background: var(--surface2); color: var(--muted); cursor: not-allowed; }
+
+.suggestions { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+.sug-item { padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.sug-item:last-child { border-bottom: none; }
+.sug-item:active { background: rgba(56,189,248,0.1); }
+.sug-code { font-family: monospace; font-size: 12px; font-weight: 700; color: var(--accent); background: rgba(56,189,248,0.1); padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+.sug-name { font-weight: 700; }
+.sug-hl { color: var(--accent); }
+.sug-sector { font-size: 11px; color: var(--muted); }
+
+.presets { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 20px 16px; }
+.preset { padding: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+.preset:active { border-color: var(--accent); color: var(--accent); }
+
+.loading { display: none; text-align: center; padding: 40px 20px; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 14px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading p { color: var(--muted); font-size: 13px; }
+
+.error { display: none; margin: 0 20px; padding: 14px 16px; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 12px; font-size: 13px; color: var(--down); line-height: 1.6; }
+
+#results { display: none; padding: 0 20px; }
+
+.stock-header { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+.stock-meta { font-family: monospace; font-size: 12px; color: var(--accent); margin-bottom: 4px; }
+.stock-name { font-size: 18px; font-weight: 900; }
+.stock-sector { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 14px; overflow: hidden; }
+.card-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; color: var(--accent); background: rgba(56,189,248,0.04); }
+.card-body { padding: 16px; }
+
+.tv-container { background: #0d1420; border-radius: 12px; overflow: hidden; }
+#tradingview_widget { height: 380px; }
+#tradingview_widget iframe { border: none !important; }
+
+.verdict-box { text-align: center; padding: 16px 0; }
+.verdict-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.verdict-badge { display: inline-block; padding: 10px 28px; border-radius: 50px; font-size: 20px; font-weight: 900; margin-bottom: 12px; }
+.verdict-buy { background: rgba(34,197,94,0.15); color: var(--up); border: 2px solid rgba(34,197,94,0.3); }
+.verdict-hold { background: rgba(245,158,11,0.15); color: var(--gold); border: 2px solid rgba(245,158,11,0.3); }
+.verdict-sell { background: rgba(239,68,68,0.15); color: var(--down); border: 2px solid rgba(239,68,68,0.3); }
+.verdict-reason { font-size: 13px; color: var(--muted); line-height: 1.7; }
+
+.ind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ind-item { background: var(--surface2); border-radius: 10px; padding: 12px; }
+.ind-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.ind-value { font-size: 14px; font-weight: 700; }
+.ind-sub { font-size: 11px; margin-top: 4px; font-weight: 700; }
+.sig-up { color: var(--up); } .sig-down { color: var(--down); } .sig-neu { color: var(--gold); }
+
+.news-item { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.news-item:last-child { border-bottom: none; }
+.news-sent { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-bottom: 6px; }
+.sent-pos { background: rgba(34,197,94,0.15); color: var(--up); }
+.sent-neg { background: rgba(239,68,68,0.15); color: var(--down); }
+.sent-neu { background: rgba(100,116,139,0.15); color: var(--muted); }
+.news-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; line-height: 1.5; }
+.news-summary { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+.risk-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.6; }
+.risk-item:last-child { border-bottom: none; }
+
+.disclaimer { margin: 14px 0 0; padding: 12px; background: rgba(245,158,11,0.05); border: 1px solid rgba(245,158,11,0.15); border-radius: 10px; font-size: 11px; color: var(--gold); line-height: 1.6; }
+.retry-btn { display: block; width: 100%; margin-top: 14px; padding: 14px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: 14px; font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top"><span style="font-size:26px">📈</span><h1>株式<span>アナリスト</span></h1></div>
+  <p>リアルタイムチャート + AI分析</p>
+  <div class="warning">⚠️ 投資判断はご自身の責任で行ってください。</div>
+</div>
+
+<div class="search-area">
+  <div class="search-wrap">
+    <div class="search-row">
+      <input class="ticker-input" id="tickerInput" placeholder="会社名・証券コードで検索（例：トヨタ）" autocomplete="off" />
+      <button class="search-btn" id="searchBtn" onclick="analyze()">分析</button>
+    </div>
+    <div class="suggestions" id="suggestions"></div>
+  </div>
+</div>
+<div class="presets">
+  <button class="preset" onclick="pick('7203','トヨタ自動車','輸送用機器')">🚗 トヨタ</button>
+  <button class="preset" onclick="pick('6758','ソニーグループ','電気機器')">🎮 ソニー</button>
+  <button class="preset" onclick="pick('9984','ソフトバンクグループ','情報・通信')">📡 SBG</button>
+  <button class="preset" onclick="pick('7974','任天堂','その他製品')">🎲 任天堂</button>
+</div>
+
+<div class="loading" id="loading"><div class="spinner"></div><p>AIが分析中...</p></div>
+<div class="error" id="errBox"></div>
+<div id="results"></div>
+
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script>
+const STOCKS = [
+  {code:'7203',name:'トヨタ自動車',kana:'とよた',sector:'輸送用機器'},
+  {code:'6758',name:'ソニーグループ',kana:'そにー',sector:'電気機器'},
+  {code:'9984',name:'ソフトバンクグループ',kana:'そふとばんく',sector:'情報・通信'},
+  {code:'7974',name:'任天堂',kana:'にんてんどう',sector:'その他製品'},
+  {code:'6861',name:'キーエンス',kana:'きーえんす',sector:'電気機器'},
+  {code:'4063',name:'信越化学工業',kana:'しんえつかがく',sector:'化学'},
+  {code:'8306',name:'三菱UFJフィナンシャル',kana:'みつびしゆーえふじぇい',sector:'銀行業'},
+  {code:'9432',name:'日本電信電話',kana:'にっぽんでんしんでんわ',sector:'情報・通信'},
+  {code:'9433',name:'KDDI',kana:'けーでぃーでぃーあい',sector:'情報・通信'},
+  {code:'8035',name:'東京エレクトロン',kana:'とうきょうえれくとろん',sector:'電気機器'},
+  {code:'6367',name:'ダイキン工業',kana:'だいきん',sector:'機械'},
+  {code:'4519',name:'中外製薬',kana:'ちゅうがいせいやく',sector:'医薬品'},
+  {code:'4502',name:'武田薬品工業',kana:'たけだやくひん',sector:'医薬品'},
+  {code:'7267',name:'本田技研工業',kana:'ほんだ',sector:'輸送用機器'},
+  {code:'7751',name:'キヤノン',kana:'きゃのん',sector:'電気機器'},
+  {code:'8411',name:'みずほフィナンシャルグループ',kana:'みずほ',sector:'銀行業'},
+  {code:'8316',name:'三井住友フィナンシャルグループ',kana:'みついすみとも',sector:'銀行業'},
+  {code:'6981',name:'村田製作所',kana:'むらた',sector:'電気機器'},
+  {code:'4661',name:'オリエンタルランド',kana:'おりえんたるらんど',sector:'サービス業'},
+  {code:'9020',name:'東日本旅客鉄道',kana:'じぇいあーるひがしにほん',sector:'陸運業'},
+  {code:'7201',name:'日産自動車',kana:'にっさん',sector:'輸送用機器'},
+  {code:'5401',name:'日本製鉄',kana:'にっぽんせいてつ',sector:'鉄鋼'},
+  {code:'8001',name:'伊藤忠商事',kana:'いとうちゅう',sector:'卸売業'},
+  {code:'8031',name:'三井物産',kana:'みついぶっさん',sector:'卸売業'},
+  {code:'8058',name:'三菱商事',kana:'みつびししょうじ',sector:'卸売業'},
+  {code:'4452',name:'花王',kana:'かおう',sector:'化学'},
+  {code:'6702',name:'富士通',kana:'ふじつう',sector:'電気機器'},
+  {code:'6503',name:'三菱電機',kana:'みつびしでんき',sector:'電気機器'},
+  {code:'6902',name:'デンソー',kana:'でんそー',sector:'輸送用機器'},
+  {code:'2802',name:'味の素',kana:'あじのもと',sector:'食料品'},
+  {code:'8267',name:'イオン',kana:'いおん',sector:'小売業'},
+  {code:'4755',name:'楽天グループ',kana:'らくてん',sector:'情報・通信'},
+];
+
+let selCode = '', selName = '', selSector = '';
+
+function pick(code, name, sector) {
+  selCode = code; selName = name; selSector = sector || '';
+  document.getElementById('tickerInput').value = code + '　' + name;
+  hideSug();
+}
+
+function hideSug() { document.getElementById('suggestions').style.display = 'none'; }
+
+function hl(text, q) {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text;
+  return text.slice(0,i) + '<span class="sug-hl">' + text.slice(i,i+q.length) + '</span>' + text.slice(i+q.length);
+}
+
+document.getElementById('tickerInput').addEventListener('input', function() {
+  const q = this.value.trim();
+  selCode = ''; selName = ''; selSector = '';
+  if (!q) { hideSug(); return; }
+  const hits = STOCKS.filter(s => s.name.includes(q) || s.code.includes(q) || s.kana.includes(q.toLowerCase())).slice(0, 8);
+  if (!hits.length) { hideSug(); return; }
+  const box = document.getElementById('suggestions');
+  box.innerHTML = hits.map(s => `<div class="sug-item" onclick="pick('${s.code}','${s.name}','${s.sector}')"><span class="sug-code">${s.code}</span><div><div class="sug-name">${hl(s.name,q)}</div><div class="sug-sector">${s.sector}</div></div></div>`).join('');
+  box.style.display = 'block';
+});
+
+document.getElementById('tickerInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { hideSug(); analyze(); }
+  if (e.key === 'Escape') hideSug();
+});
+document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) hideSug(); });
+
+async function analyze() {
+  const input = document.getElementById('tickerInput').value.trim();
+  if (!input) { showErr('会社名または証券コードを入力してください。'); return; }
+
+  let code = selCode, name = selName, sector = selSector;
+  if (!code) {
+    if (/^\d{4}/.test(input)) {
+      code = input.slice(0,4);
+      const f = STOCKS.find(s => s.code === code);
+      if (f) { name = f.name; sector = f.sector; }
+    } else {
+      const f = STOCKS.find(s => s.name.includes(input));
+      if (f) { code = f.code; name = f.name; sector = f.sector; }
+      else { showErr('銘柄が見つかりませんでした。リストから選んでください。'); return; }
+    }
+  }
+
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('errBox').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('searchBtn').disabled = true;
+
+  try {
+    const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: `東証「${name}」（${code}）の株式について、JSONのみで返してください：
+{"trend":"上昇/下落/横ばい","ma_position":"MA25より上/下/交差付近","rsi_state":"過熱/適正/売られすぎ","macd_signal":"買い/売り/中立","verdict":"買い/様子見/売り","verdict_reason":"理由2文","confidence":"高/中/低","news":[{"title":"関連ニュース1","summary":"要約1文","sentiment":"positive/negative/neutral"},{"title":"関連ニュース2","summary":"要約1文","sentiment":"positive/negative/neutral"}],"risks":["リスク1","リスク2"]}` }]
+      })
+    });
+    const aiData = await aiRes.json();
+    const aiText = aiData.content?.map(b => b.text||'').join('') || '';
+    const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('AI分析の取得に失敗しました');
+    const ai = JSON.parse(jsonMatch[0]);
+
+    render(code, name, sector, ai);
+
+  } catch(e) {
+    showErr('エラー: ' + e.message);
+  }
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('searchBtn').disabled = false;
+}
+
+function render(code, name, sector, ai) {
+  const vc = ai.verdict === '買い' ? 'verdict-buy' : ai.verdict === '売り' ? 'verdict-sell' : 'verdict-hold';
+  const ts = ai.trend === '上昇' ? 'sig-up' : ai.trend === '下落' ? 'sig-down' : 'sig-neu';
+  const rs = ai.rsi_state === '売られすぎ' ? 'sig-up' : ai.rsi_state === '過熱' ? 'sig-down' : 'sig-neu';
+  const ms = ai.macd_signal === '買い' ? 'sig-up' : ai.macd_signal === '売り' ? 'sig-down' : 'sig-neu';
+  const mas = ai.ma_position?.includes('上') ? 'sig-up' : ai.ma_position?.includes('下') ? 'sig-down' : 'sig-neu';
+
+  document.getElementById('results').innerHTML = `
+    <div class="stock-header">
+      <div class="stock-meta">${code} · 東証</div>
+      <div class="stock-name">${name}</div>
+      <div class="stock-sector">${sector}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">📊 リアルタイムチャート</div>
+      <div class="card-body">
+        <div class="tv-container">
+          <div id="tradingview_widget"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🎯 AI総合判断</div>
+      <div class="card-body">
+        <div class="verdict-box">
+          <div class="verdict-label">推奨アクション（確信度：${ai.confidence}）</div>
+          <div class="verdict-badge ${vc}">${ai.verdict}</div>
+          <div class="verdict-reason">${ai.verdict_reason}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">📈 テクニカル指標</div>
+      <div class="card-body">
+        <div class="ind-grid">
+          <div class="ind-item">
+            <div class="ind-label">トレンド</div>
+            <div class="ind-value ${ts}">${ai.trend}</div>
+            <div class="ind-sub ${mas}">${ai.ma_position}</div>
+          </div>
+          <div class="ind-item">
+            <div class="ind-label">RSI / MACD</div>
+            <div class="ind-value ${rs}">${ai.rsi_state}</div>
+            <div class="ind-sub ${ms}">MACD: ${ai.macd_signal}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">📰 関連ニュース</div>
+      <div class="card-body">
+        ${ai.news.map(n => `
+          <div class="news-item">
+            <span class="news-sent ${n.sentiment==='positive'?'sent-pos':n.sentiment==='negative'?'sent-neg':'sent-neu'}">${n.sentiment==='positive'?'↑ポジティブ':n.sentiment==='negative'?'↓ネガティブ':'→中立'}</span>
+            <div class="news-title">${n.title}</div>
+            <div class="news-summary">${n.summary}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">⚠️ リスク要因</div>
+      <div class="card-body">
+        ${ai.risks.map(r => `<div class="risk-item"><span>⚠️</span><span>${r}</span></div>`).join('')}
+      </div>
+    </div>
+
+    <div class="disclaimer">⚠️ 本分析はAIによる参考情報です。投資判断はご自身の責任で行ってください。</div>
+    <button class="retry-btn" onclick="resetApp()">🔄 別の銘柄を検索</button>
+  `;
+
+  document.getElementById('results').style.display = 'block';
+
+  // TradingViewウィジェット初期化
+  new TradingView.widget({
+    autosize: true,
+    symbol: 'TSE:' + code,
+    interval: 'D',
+    timezone: 'Asia/Tokyo',
+    theme: 'dark',
+    style: '1',
+    locale: 'ja',
+    enable_publishing: false,
+    backgroundColor: 'rgba(13,20,32,1)',
+    hide_top_toolbar: false,
+    hide_legend: false,
+    save_image: false,
+    container_id: 'tradingview_widget',
+    studies: ['MASimple@tv-basicstudies', 'RSI@tv-basicstudies']
+  });
+
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showErr(msg) {
+  const el = document.getElementById('errBox');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function resetApp() {
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('tickerInput').value = '';
+  selCode = ''; selName = ''; selSector = '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
