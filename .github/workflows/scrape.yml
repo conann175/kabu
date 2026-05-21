@@ -1,0 +1,44 @@
+name: Scrape netkeiba
+
+on:
+  schedule:
+    - cron: "0 14 * * 6,0"
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "開始日 (YYYYMMDD)"
+        required: false
+      end_date:
+        description: "終了日 (YYYYMMDD)"
+        required: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 supabase python-dotenv
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.start_date }}" ]; then
+            python netkeiba_scraper.py \
+              ${{ github.event.inputs.start_date }} \
+              ${{ github.event.inputs.end_date }}
+          else
+            python netkeiba_scraper.py
+          fi
