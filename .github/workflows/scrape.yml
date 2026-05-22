@@ -36,9 +36,9 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           if [ -n "${{ github.event.inputs.start_date }}" ]; then
-            python netkeiba_scraper.py \
+            python src/netkeiba_scraper.py \
               ${{ github.event.inputs.start_date }} \
               ${{ github.event.inputs.end_date }}
           else
-            python netkeiba_scraper.py
+            python src/netkeiba_scraper.py
           fi
