@@ -1,0 +1,32 @@
+name: Check DB counts
+
+on:
+  workflow_dispatch:
+    inputs:
+      race_date:
+        description: "Race date (YYYY-MM-DD)"
+        required: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install supabase
+
+      - name: Check counts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python scripts/check_db_counts.py "${{ github.event.inputs.race_date }}"
