@@ -1,19 +1,13 @@
 """
 netkeiba.com スクレイピング → Supabase 取り込みスクリプト
 実行環境: GitHub Actions (Python 3.11)
-
-必要なパッケージ:
-  pip install requests beautifulsoup4 supabase python-dotenv
-
-環境変数（GitHub Secrets に登録）:
-  SUPABASE_URL  : SupabaseプロジェクトのURL
-  SUPABASE_KEY  : Supabaseのservice_role key
 """
 
 import os
 import re
 import time
 import logging
+import random
 from datetime import datetime, timedelta
 
 import requests
@@ -32,17 +26,29 @@ supabase: Client = create_client(
 
 BASE_DB   = "https://db.netkeiba.com"
 BASE_RACE = "https://race.netkeiba.com"
-HEADERS   = {"User-Agent": "Mozilla/5.0"}
-INTERVAL  = 2
 
-BET_TYPES = ["単勝", "複勝", "枠連", "馬連", "馬単", "ワイド", "3連複", "3連単"]
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://race.netkeiba.com/",
+}
+
+session = requests.Session()
+session.headers.update(HEADERS)
 
 
 def fetch(url: str):
     try:
-        time.sleep(INTERVAL)
-        res = requests.get(url, headers=HEADERS, timeout=15)
+        time.sleep(random.uniform(3, 6))
+        res = session.get(url, timeout=20)
         res.encoding = "EUC-JP"
+        if res.status_code in (403, 404):
+            logger.warning(f"{res.status_code}: {url} - skip")
+            return None
         res.raise_for_status()
         return BeautifulSoup(res.text, "html.parser")
     except Exception as e:
@@ -145,8 +151,8 @@ def scrape_race(race_id: str) -> None:
             if len(cols) < 10:
                 continue
             try:
-                hh = cols[3].find("a")["href"] if cols[3].find("a") else ""
-                jh = cols[6].find("a")["href"] if cols[6].find("a") else ""
+                hh  = cols[3].find("a")["href"] if cols[3].find("a") else ""
+                jh  = cols[6].find("a")["href"] if cols[6].find("a") else ""
                 th2 = cols[7].find("a")["href"] if cols[7].find("a") else ""
                 hid = re.search(r"/horse/(\w+)", hh)
                 jid = re.search(r"/jockey/(\w+)", jh)
@@ -182,7 +188,7 @@ def scrape_race(race_id: str) -> None:
             if len(cols) < 3:
                 continue
             try:
-                bt = cols[0].text.strip()
+                bt      = cols[0].text.strip()
                 combos  = [s.strip() for s in cols[1].text.strip().split("\n") if s.strip()]
                 amounts = [s.strip() for s in cols[2].text.strip().split("\n") if s.strip()]
                 pops    = [s.strip() for s in cols[3].text.strip().split("\n") if s.strip()] if len(cols) > 3 else []
@@ -198,12 +204,17 @@ def scrape_race(race_id: str) -> None:
 
 
 def scrape_date_range(start: str, end: str) -> None:
+    logger.info("Initializing session...")
+    session.get("https://race.netkeiba.com/", timeout=20)
+    time.sleep(3)
     current = datetime.strptime(start, "%Y%m%d")
     end_dt  = datetime.strptime(end,   "%Y%m%d")
     while current <= end_dt:
         ds = current.strftime("%Y%m%d")
         logger.info(f"=== {ds} ===")
-        for race_id in get_race_id_list(ds):
+        race_ids = get_race_id_list(ds)
+        logger.info(f"  {len(race_ids)} races found")
+        for race_id in race_ids:
             scrape_race(race_id)
         current += timedelta(days=1)
 
