@@ -1,6 +1,9 @@
 """
 netkeiba.com スクレイピング → Supabase 取り込みスクリプト
 実行環境: GitHub Actions (Python 3.11)
+
+race.netkeiba.com を使用（db.netkeiba.comはCloudフロムのIPをブロック）
+レース結果URL: https://race.netkeiba.com/race/result.html?race_id={race_id}
 """
 
 import os
@@ -24,7 +27,6 @@ supabase: Client = create_client(
     os.environ["SUPABASE_KEY"],
 )
 
-BASE_DB   = "https://db.netkeiba.com"
 BASE_RACE = "https://race.netkeiba.com"
 
 HEADERS = {
@@ -64,6 +66,7 @@ def upsert(table: str, data: dict) -> None:
 
 
 def get_race_id_list(date: str):
+    """指定日のレースID一覧を取得。"""
     url = f"{BASE_RACE}/top/race_list_sub.html?kaisai_date={date}"
     soup = fetch(url)
     if not soup:
@@ -76,113 +79,97 @@ def get_race_id_list(date: str):
     return list(set(race_ids))
 
 
-def scrape_horse(horse_id: str) -> None:
-    url = f"{BASE_DB}/horse/{horse_id}/"
-    soup = fetch(url)
-    if not soup:
-        return
-    profile = {}
-    tbl = soup.find("table", class_="db_prof_table")
-    if tbl:
-        for tr in tbl.find_all("tr"):
-            th = tr.find("th")
-            td = tr.find("td")
-            if th and td:
-                profile[th.text.strip()] = td.text.strip()
-    upsert("horses", {
-        "horse_id":   horse_id,
-        "horse_name": soup.find("div", class_="horse_title").find("h1").text.strip() if soup.find("div", class_="horse_title") else "",
-        "birth_date": profile.get("生年月日"),
-        "sex":        profile.get("性別"),
-        "coat_color": profile.get("毛色"),
-    })
-    ped = soup.find("table", class_="blood_table")
-    if ped:
-        cells = [td.text.strip() for td in ped.find_all("td")]
-        if len(cells) >= 6:
-            upsert("horse_pedigrees", {
-                "horse_id":      horse_id,
-                "father":        cells[0], "father_father": cells[1],
-                "father_mother": cells[2], "mother":        cells[3],
-                "mother_father": cells[4], "mother_mother": cells[5],
-            })
-
-
 def scrape_race(race_id: str) -> None:
-    url = f"{BASE_DB}/race/{race_id}/"
+    """race.netkeiba.comのresultページからレース結果を取得。"""
+    url = f"{BASE_RACE}/race/result.html?race_id={race_id}&rf=race_list"
     soup = fetch(url)
     if not soup:
         return
+
     race_data = {"race_id": race_id, "venue_code": race_id[4:6]}
-    try:
-        head = soup.find("div", class_="race_head_inner") or soup.find("div", class_="mainrace_data")
-        race_data["race_name"] = head.find("h1").text.strip() if head else ""
-        intro = soup.find("div", class_="data_intro")
-        if intro:
-            for p in intro.find_all("p"):
-                t = p.text.strip()
-                m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", t)
-                if m:
-                    race_data["race_date"] = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
-                m2 = re.search(r"(\d+)R", t)
-                if m2:
-                    race_data["race_number"] = int(m2.group(1))
-        ct = soup.find("div", class_="race_data")
-        if ct:
-            t = ct.text
-            if "芝" in t: race_data["surface"] = "芝"
-            elif "ダ" in t: race_data["surface"] = "ダート"
-            elif "障" in t: race_data["surface"] = "障害"
-            if "右" in t: race_data["direction"] = "右"
-            elif "左" in t: race_data["direction"] = "左"
-            m = re.search(r"(\d+)m", t)
-            if m: race_data["distance"] = int(m.group(1))
-            mw = re.search(r"天候:(\S+)", t)
-            if mw: race_data["weather"] = mw.group(1)
-            mt = re.search(r"馬場:(\S+)", t)
-            if mt: race_data["track_condition"] = mt.group(1)
-    except Exception as e:
-        logger.warning(f"race info parse error: {race_id} -> {e}")
+
+    # レース名
+    race_name_el = soup.find("div", class_="RaceName") or soup.find("h1", class_="RaceName")
+    if race_name_el:
+        race_data["race_name"] = race_name_el.text.strip()
+
+    # レース情報（距離・馬場・天候など）
+    race_data01 = soup.find("div", class_="RaceData01")
+    if race_data01:
+        t = race_data01.text
+        if "芝" in t: race_data["surface"] = "芝"
+        elif "ダ" in t: race_data["surface"] = "ダート"
+        elif "障" in t: race_data["surface"] = "障害"
+        if "右" in t: race_data["direction"] = "右"
+        elif "左" in t: race_data["direction"] = "左"
+        m = re.search(r"(\d+)m", t)
+        if m: race_data["distance"] = int(m.group(1))
+        mw = re.search(r"天候:(\S+)", t)
+        if mw: race_data["weather"] = mw.group(1)
+        mt = re.search(r"馬場:(\S+)", t)
+        if mt: race_data["track_condition"] = mt.group(1)
+
+    # 日付・レース番号
+    race_data02 = soup.find("div", class_="RaceData02")
+    if race_data02:
+        spans = race_data02.find_all("span")
+        for span in spans:
+            m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", span.text)
+            if m:
+                race_data["race_date"] = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+            m2 = re.search(r"(\d+)R", span.text)
+            if m2:
+                race_data["race_number"] = int(m2.group(1))
+
     upsert("races", race_data)
-    rt = soup.find("table", class_="race_table_01")
-    if rt:
-        for tr in rt.find_all("tr")[1:]:
+
+    # 出走・結果テーブル
+    result_table = soup.find("table", class_="RaceTable01") or soup.find("table", id="All_Result_Tables")
+    if result_table:
+        for tr in result_table.find_all("tr")[1:]:
             cols = tr.find_all("td")
-            if len(cols) < 10:
+            if len(cols) < 8:
                 continue
             try:
-                hh  = cols[3].find("a")["href"] if cols[3].find("a") else ""
-                jh  = cols[6].find("a")["href"] if cols[6].find("a") else ""
-                th2 = cols[7].find("a")["href"] if cols[7].find("a") else ""
-                hid = re.search(r"/horse/(\w+)", hh)
-                jid = re.search(r"/jockey/(\w+)", jh)
-                tid = re.search(r"/trainer/(\w+)", th2)
-                horse_id   = hid.group(1) if hid else None
-                jockey_id  = jid.group(1) if jid else None
-                trainer_id = tid.group(1) if tid else None
-                if jockey_id:
-                    upsert("jockeys", {"jockey_id": jockey_id, "jockey_name": cols[6].text.strip()})
-                if trainer_id:
-                    upsert("trainers", {"trainer_id": trainer_id, "trainer_name": cols[7].text.strip()})
-                if horse_id:
+                # 馬名リンクから horse_id を取得
+                horse_link = tr.find("a", href=re.compile(r"/horse/"))
+                horse_id = re.search(r"/horse/(\w+)", horse_link["href"]).group(1) if horse_link else None
+
+                # 騎手リンクから jockey_id を取得
+                jockey_link = tr.find("a", href=re.compile(r"/jockey/"))
+                jockey_id = re.search(r"/jockey/(\w+)", jockey_link["href"]).group(1) if jockey_link else None
+
+                # 調教師リンクから trainer_id を取得
+                trainer_link = tr.find("a", href=re.compile(r"/trainer/"))
+                trainer_id = re.search(r"/trainer/(\w+)", trainer_link["href"]).group(1) if trainer_link else None
+
+                if jockey_id and jockey_link:
+                    upsert("jockeys", {"jockey_id": jockey_id, "jockey_name": jockey_link.text.strip()})
+                if trainer_id and trainer_link:
+                    upsert("trainers", {"trainer_id": trainer_id, "trainer_name": trainer_link.text.strip()})
+                if horse_id and horse_link:
                     ex = supabase.table("horses").select("horse_id").eq("horse_id", horse_id).execute()
                     if not ex.data:
-                        scrape_horse(horse_id)
+                        upsert("horses", {"horse_id": horse_id, "horse_name": horse_link.text.strip()})
+
                 fp = cols[0].text.strip()
                 upsert("race_entries", {
-                    "race_id": race_id, "horse_id": horse_id,
-                    "jockey_id": jockey_id, "trainer_id": trainer_id,
+                    "race_id":         race_id,
+                    "horse_id":        horse_id,
+                    "jockey_id":       jockey_id,
+                    "trainer_id":      trainer_id,
                     "post_position":   int(cols[1].text.strip()) if cols[1].text.strip().isdigit() else None,
                     "horse_number":    int(cols[2].text.strip()) if cols[2].text.strip().isdigit() else None,
                     "finish_position": int(fp) if fp.isdigit() else None,
-                    "finish_time":     cols[8].text.strip() if len(cols) > 8 else None,
-                    "margin":          cols[9].text.strip() if len(cols) > 9 else None,
-                    "odds":            float(cols[12].text.strip()) if len(cols) > 12 and cols[12].text.strip().replace(".", "").isdigit() else None,
-                    "popularity":      int(cols[13].text.strip()) if len(cols) > 13 and cols[13].text.strip().isdigit() else None,
+                    "finish_time":     cols[7].text.strip() if len(cols) > 7 else None,
+                    "odds":            float(cols[10].text.strip()) if len(cols) > 10 and re.match(r"[\d.]+", cols[10].text.strip()) else None,
+                    "popularity":      int(cols[11].text.strip()) if len(cols) > 11 and cols[11].text.strip().isdigit() else None,
                 })
             except Exception as e:
-                logger.warning(f"entry parse error: {race_id} -> {e}")
-    for pt in soup.find_all("table", class_="pay_table_01"):
+                logger.warning(f"entry parse error: {race_id} row -> {e}")
+
+    # 払い戻しテーブル
+    for pt in soup.find_all("table", class_="Harai"):
         for tr in pt.find_all("tr"):
             cols = tr.find_all("td")
             if len(cols) < 3:
@@ -194,19 +181,23 @@ def scrape_race(race_id: str) -> None:
                 pops    = [s.strip() for s in cols[3].text.strip().split("\n") if s.strip()] if len(cols) > 3 else []
                 for i, combo in enumerate(combos):
                     upsert("payouts", {
-                        "race_id": race_id, "bet_type": bt, "combination": combo,
-                        "payout": int(amounts[i].replace(",", "").replace("円", "")) if i < len(amounts) else 0,
-                        "popularity": int(pops[i].replace("番人気", "")) if i < len(pops) else None,
+                        "race_id":     race_id,
+                        "bet_type":    bt,
+                        "combination": combo,
+                        "payout":      int(amounts[i].replace(",", "").replace("円", "")) if i < len(amounts) else 0,
+                        "popularity":  int(pops[i].replace("番人気", "")) if i < len(pops) else None,
                     })
             except Exception as e:
                 logger.warning(f"payout parse error: {race_id} -> {e}")
+
     logger.info(f"done: {race_id}")
 
 
 def scrape_date_range(start: str, end: str) -> None:
     logger.info("Initializing session...")
-    session.get("https://race.netkeiba.com/", timeout=20)
+    session.get(f"{BASE_RACE}/", timeout=20)
     time.sleep(3)
+
     current = datetime.strptime(start, "%Y%m%d")
     end_dt  = datetime.strptime(end,   "%Y%m%d")
     while current <= end_dt:
